@@ -4,19 +4,7 @@ import illustration from '/img1.png';
 import SplashScreen from './SplashScreen'; // Make sure path is correct
 
 const Home = () => {
-  const [showSplash, setShowSplash] = useState(true);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setShowSplash(false);
-    }, 8000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  if (showSplash) {
-    return <SplashScreen onFinish={() => setShowSplash(false)} />;
-  }
-
+ 
   return (
     <>
       <div className="min-h-screen flex flex-col md:flex-row items-center justify-center px-6 md:px-20 bg-gradient-to-br from-indigo-50 to-white">

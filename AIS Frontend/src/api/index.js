@@ -1,4 +1,5 @@
 import Cookies from "js-cookie";  // Import js-cookie
+import axios from 'axios';
 
 const API_URL = "http://localhost:5000/api";
 
@@ -13,7 +14,7 @@ const fetchData = async (url, options = {}) => {
   }
 
   const data = await response.json();
-  console.log(`Response from ${url}:`, data);  // Log successful response
+  // console.log(`Response from ${url}:`, data);  // Log successful response
   return data;
 };
 
@@ -101,7 +102,17 @@ export const createJob = async (jobData) => {
   }
 };
 
+export const deleteJob = async (jobId) => {
+  try {
+    // Proceed with the delete request without checking the user's role
+    const response = await axios.delete(`${API_URL}/jobs/${jobId}`);
+    return response.data;
 
+  } catch (error) {
+    // Handle error, e.g., display an error message to the user
+    throw new Error(error.message || 'Error deleting job');
+  }
+};
 
 // Get all jobs using the token stored in cookies
 export const getAllJobs = async () => {
@@ -186,7 +197,7 @@ export const getCompanyDetails = async (companyId) => {
     }
 
     const data = await response.json();
-    console.log("Company details fetched successfully:", data);
+    // console.log("Company details fetched successfully:", data);
     return data;
 
   } catch (error) {

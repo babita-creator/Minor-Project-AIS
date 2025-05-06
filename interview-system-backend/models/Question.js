@@ -12,7 +12,7 @@ const questionSchema = new mongoose.Schema({
   },
   question_type: {
     type: String,
-    enum: ['multiple-choice', 'open-ended'], // Check what enum values you have
+    enum: ['multiple-choice', 'open-ended'],
     required: true,
   },
   options: {
@@ -21,7 +21,9 @@ const questionSchema = new mongoose.Schema({
   },
   correct_answer: {
     type: String,
-    required: false,
+    required: function () {
+      return this.question_type === 'MCQ';
+    },
   },
 });
 

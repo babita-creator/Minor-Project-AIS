@@ -1,4 +1,3 @@
-// routes/jobRoutes.js
 const express = require('express');
 const router = express.Router();
 
@@ -11,6 +10,7 @@ const {
 } = require('../controllers/jobController');
 
 const { protect, isCompany } = require('../middlewares/authMiddleware');
+const Job = require('../models/Job'); // Assuming you have a Job model
 
 // Create a job
 router.post('/', protect, isCompany, createJob);
@@ -24,7 +24,7 @@ router.get('/:id', getJobById);
 // Update job
 router.put('/:id', protect, isCompany, updateJob);
 
-// Delete job
-router.delete('/:id', protect, isCompany, deleteJob);
+// Delete job (only the creator can delete)
+router.delete('/:id', deleteJob);  // Use the deleteJob function from the controller
 
 module.exports = router;

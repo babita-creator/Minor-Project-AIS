@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { FiPlus, FiX } from 'react-icons/fi';
 
-// Utility to read cookies
 const getCookie = (name) => {
   const value = `; ${document.cookie}`;
   const parts = value.split(`; ${name}=`);
@@ -19,14 +19,12 @@ const CreateJobForm = () => {
 
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
   const navigate = useNavigate();
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setJobData((prevData) => ({
-      ...prevData,
-      [name]: value,
-    }));
+    setJobData((prevData) => ({ ...prevData, [name]: value }));
   };
 
   const handleSubmit = async (e) => {
@@ -37,18 +35,15 @@ const CreateJobForm = () => {
     try {
       const token = getCookie('token');
       if (!token) {
-        setError("Authentication token is missing.");
+        setError('Authentication token is missing.');
         setLoading(false);
         return;
       }
 
-      const API_URL = "http://localhost:5000/api";
-
+      const API_URL = 'http://localhost:5000/api';
       const response = await fetch(`${API_URL}/jobs`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
           ...jobData,
@@ -58,13 +53,13 @@ const CreateJobForm = () => {
       });
 
       const data = await response.json();
-
       if (!response.ok) {
         setError(data.message || 'Failed to create job');
         return;
       }
 
       navigate('/company-dashboard');
+      setIsModalOpen(false);
     } catch (err) {
       setError(err.message || 'An error occurred');
     } finally {
@@ -73,113 +68,86 @@ const CreateJobForm = () => {
   };
 
   return (
-    <div
-      className="h-screen w-full bg-cover bg-center flex items-center justify-center"
-      style={{ backgroundColor: "#FFFBF0" }}
-    >
-      <form
-        onSubmit={handleSubmit}
-        className="bg-white p-8 rounded-2xl shadow-2xl border border-gray-200 w-full max-w-lg"
+    <>
+      {/* Floating open button */}
+      <button
+        onClick={() => setIsModalOpen(true)}
+        className="fixed bottom-8 right-8 bg-blue-600 text-white p-4 rounded-full shadow-xl hover:bg-blue-700 transition z-40"
       >
-        <h2 className="text-3xl font-bold mb-6 text-gray-900 text-center drop-shadow">
-          Create Job
-        </h2>
+        <FiPlus className="text-3xl" />
+      </button>
 
-        {error && (
-          <p className="text-red-700 mb-4 bg-red-100 p-2 rounded text-center">
-            {error}
-          </p>
-        )}
+      {/* Modal */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4">
+          <div className="relative bg-white w-full max-w-2xl p-8 rounded-2xl shadow-2xl">
+            {/* Close button */}
+            <button
+              onClick={() => setIsModalOpen(false)}
+              className="absolute top-4 right-4 text-gray-600 hover:text-red-500 transition"
+            >
+              <FiX className="text-4xl" />
+            </button>
 
-        <div className="space-y-4">
-          <div>
-            <label htmlFor="title" className="block text-sm font-medium text-gray-600">
-              Job Title
-            </label>
-            <input
-              type="text"
-              id="title"
-              name="title"
-              value={jobData.title}
-              onChange={handleChange}
-              className="mt-1 w-full p-3 border border-gray-300 rounded-lg bg-white placeholder-gray-400"
-              required
-            />
+            <h2 className="text-4xl font-bold mb-6 text-center text-gray-900">Create Job</h2>
+
+            {error && (
+              <p className="text-red-700 mb-4 bg-red-100 p-3 rounded-lg text-center font-medium">
+                {error}
+              </p>
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-5">
+              {[
+                { id: 'title', label: 'Job Title', type: 'text' },
+                { id: 'description', label: 'Job Description', type: 'textarea' },
+                { id: 'location', label: 'Job Location', type: 'text' },
+                { id: 'salary', label: 'Salary (NPR)', type: 'number' },
+                { id: 'expiresInDays', label: 'Expires In (Days)', type: 'number', min: 1 },
+              ].map(({ id, label, type, min }) => (
+                <div key={id}>
+                  <label htmlFor={id} className="block text-sm font-medium text-gray-700 mb-1">
+                    {label}
+                  </label>
+                  {type === 'textarea' ? (
+                    <textarea
+                      id={id}
+                      name={id}
+                      rows="4"
+                      value={jobData[id]}
+                      onChange={handleChange}
+                      required
+                      className="w-full p-3 border border-gray-300 rounded-lg bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    />
+                  ) : (
+                    <input
+                      type={type}
+                      id={id}
+                      name={id}
+                      min={min}
+                      value={jobData[id]}
+                      onChange={handleChange}
+                      required
+                      className="w-full p-3 border border-gray-300 rounded-lg bg-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    />
+                  )}
+                </div>
+              ))}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className={`w-full py-3 bg-blue-700 text-white font-semibold rounded-lg hover:bg-blue-800 transition duration-300 shadow-md ${
+                  loading ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+              >
+                {loading ? 'Creating Job...' : 'Create Job'}
+              </button>
+            </form>
           </div>
-
-          <div>
-            <label htmlFor="description" className="block text-sm font-medium text-gray-600">
-              Job Description
-            </label>
-            <textarea
-              id="description"
-              name="description"
-              value={jobData.description}
-              onChange={handleChange}
-              className="mt-1 w-full p-3 border border-gray-300 rounded-lg bg-white placeholder-gray-400"
-              rows="4"
-              required
-            />
-          </div>
-
-          <div>
-            <label htmlFor="location" className="block text-sm font-medium text-gray-600">
-              Job Location
-            </label>
-            <input
-              type="text"
-              id="location"
-              name="location"
-              value={jobData.location}
-              onChange={handleChange}
-              className="mt-1 w-full p-3 border border-gray-300 rounded-lg bg-white placeholder-gray-400"
-              required
-            />
-          </div>
-
-          <div>
-            <label htmlFor="salary" className="block text-sm font-medium text-gray-600">
-              Salary (NPR)
-            </label>
-            <input
-              type="number"
-              id="salary"
-              name="salary"
-              value={jobData.salary}
-              onChange={handleChange}
-              className="mt-1 w-full p-3 border border-gray-300 rounded-lg bg-white placeholder-gray-400"
-              required
-            />
-          </div>
-
-          <div>
-            <label htmlFor="expiresInDays" className="block text-sm font-medium text-gray-600">
-              Expires In (Days)
-            </label>
-            <input
-              type="number"
-              id="expiresInDays"
-              name="expiresInDays"
-              value={jobData.expiresInDays}
-              onChange={handleChange}
-              className="mt-1 w-full p-3 border border-gray-300 rounded-lg bg-white placeholder-gray-400"
-              required
-              min="1"
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className={`w-full py-3 px-4 bg-blue-700 text-white font-semibold rounded-lg hover:bg-gray-900 transition duration-300 shadow-lg ${
-              loading ? "opacity-50 cursor-not-allowed" : ""
-            }`}
-          >
-            {loading ? "Creating Job..." : "Create Job"}
-          </button>
         </div>
-      </form>
-    </div>
+      )}
+    </>
   );
 };
 
