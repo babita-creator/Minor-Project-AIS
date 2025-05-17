@@ -227,37 +227,42 @@ const handleSubmitAnswers = async () => {
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredJobs.map(job => {
-            const company = companyDetailsMap[job.company] || {};
-            const isOwner = userRole === 'company' && userId === job.createdBy;
-            return (
-              <div key={job._id} className="bg-white p-6 rounded-2xl shadow-md border border-gray-200 hover:shadow-xl transition-shadow duration-300">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-xl font-semibold text-indigo-700">{job.title}</h3>
-                  <span className="text-sm text-gray-500">{job.location}</span>
-                </div>
-                <p className="text-gray-700 text-sm mb-3">{job.description}</p>
-                <div className="text-sm text-gray-600 space-y-1 mb-4">
-                  <p><span className="font-medium text-gray-800">Company:</span> {company.name}</p>
-                  <p>💰 <span className="font-medium text-gray-800">Salary:</span> NPR {job.salary}</p>
-                </div>
-                <button
-                  onClick={() => handleApplyNow(job)}
-                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-xl transition-colors duration-200"
-                >
-                  Apply Now
-                </button>
-                {isOwner && (
-                  <button
-                    onClick={() => handleDeleteJob(job._id, job.createdBy)}
-                    className="w-full mt-2 bg-red-600 hover:bg-red-700 text-white py-2 rounded-xl transition-colors duration-200"
-                  >
-                    Delete Job
-                  </button>
-                )}
-              </div>
-            );
-          })}
+         {filteredJobs.map(job => {
+  const company = companyDetailsMap[job.company] || {};
+  const isOwner = userRole === 'company' && userId === job.createdBy;
+  return (
+    <div key={job._id} className="bg-white p-6 rounded-2xl shadow-md border border-gray-200 hover:shadow-xl transition-shadow duration-300">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-xl font-semibold text-indigo-700">{job.title}</h3>
+        <span className="text-sm text-gray-500">{job.location}</span>
+      </div>
+      <p className="text-gray-700 text-sm mb-3">{job.description}</p>
+      <div className="text-sm text-gray-600 space-y-1 mb-4">
+        <p><span className="font-medium text-gray-800">Company:</span> {company.name}</p>
+        <p>💰 <span className="font-medium text-gray-800">Salary:</span> NPR {job.salary}</p>
+      </div>
+      
+      {userRole !== 'company' && (
+        <button
+          onClick={() => handleApplyNow(job)}
+          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-xl transition-colors duration-200"
+        >
+          Apply Now
+        </button>
+      )}
+      
+      {isOwner && (
+        <button
+          onClick={() => handleDeleteJob(job._id, job.createdBy)}
+          className="w-full mt-2 bg-red-600 hover:bg-red-700 text-white py-2 rounded-xl transition-colors duration-200"
+        >
+          Delete Job
+        </button>
+      )}
+    </div>
+  );
+})}
+
         </div>
 
       
