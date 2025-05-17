@@ -1,9 +1,39 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import illustration from '/img1.png';
-import SplashScreen from './SplashScreen'; // Make sure path is correct
+import SplashScreen from './SplashScreen';
+import { jwtDecode} from 'jwt-decode';
+import Footer from '../components/Footer';
 
 const Home = () => {
+  const navigate = useNavigate();
+
+const handleGetStarted = () => {
+  try {
+    const cookies = document.cookie;
+    const tokenMatch = cookies.match(/token=([^;]+)/);
+    const token = tokenMatch ? tokenMatch[1] : null;
+
+    if (!token) {
+      console.error('No token found');
+      navigate('/login');
+      return;
+    }
+
+    const decoded = jwtDecode(token);
+    const role = decoded?.role;
+
+    if (role === 'company') {
+      navigate('/company-dashboard');
+    } else {
+      navigate('/user-dashboard');
+    }
+  } catch (err) {
+    console.error('Error decoding token:', err);
+    navigate('/login');
+  }
+};
  
   return (
     <>
@@ -27,13 +57,14 @@ const Home = () => {
             Say goodbye to manual scheduling, biased decisions, and time-consuming processes.
             Our AI-driven system conducts and analyzes interviews, making hiring faster, smarter, and more fair.
           </motion.p>
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition"
-          >
-            Get Started
-          </motion.button>
+           <motion.button
+      whileHover={{ scale: 1.05 }}
+      whileTap={{ scale: 0.95 }}
+      onClick={handleGetStarted}
+      className="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition"
+    >
+      Get Started
+    </motion.button>
         </div>
 
         {/* Right Column - Illustration */}
@@ -50,9 +81,7 @@ const Home = () => {
           />
         </motion.div>
       </div>
-      <footer className="w-full text-center py-4 bg-indigo-100 text-indigo-700 text-sm">
-        © {new Date().getFullYear()} Automated Interview System. All rights reserved.
-      </footer>
+     <Footer/>
     </>
   );
 };
