@@ -13,44 +13,46 @@ connectDB();
 // Initialize express app
 const app = express();
 
-// Middleware for parsing JSON
+// Middleware for parsing JSON bodies
 app.use(express.json());
 
+// Middleware for parsing URL-encoded form data (application/x-www-form-urlencoded)
+app.use(express.urlencoded({ extended: true }));
+
 // Middleware for parsing cookies
-app.use(cookieParser()); // Add cookie-parser middleware
+app.use(cookieParser());
 
 // Enable CORS (Cross-Origin Resource Sharing)
-// Enable CORS for Vite frontend and allow cookies
+// Allow Vite frontend to send requests with credentials (cookies)
 app.use(
   cors({
     origin: 'http://localhost:5173', // Vite frontend
-    credentials: true,               // Allow sending cookies
+    credentials: true,               // Allow cookies
   })
 );
 
-// Routes
-app.use('/api/auth', require('./routes/authRoutes'));      // Auth routes for login/register
-app.use('/api/jobs', require('./routes/jobRoutes'));       // Routes for job operations
-app.use('/api/interviews', require('./routes/interviewRoutes')); // Routes for interview operations
+// Define routes
+app.use('/api/auth', require('./routes/authRoutes'));         // Auth (login/register)
+app.use('/api/jobs', require('./routes/jobRoutes'));           // Job operations
+app.use('/api/interviews', require('./routes/interviewRoutes')); // Interview scheduling
+app.use('/api/interview-responses', require('./routes/interviewResponseRoutes')); // User answers
 
-// Error Handling Middleware (to catch any unhandled routes or server errors)
+// 404 handler for unknown routes
 app.use((req, res, next) => {
   const error = new Error('Not Found');
   error.status = 404;
   next(error);
 });
 
-// Global Error Handler (for all other errors)
+// Global error handler
 app.use((error, req, res, next) => {
   const statusCode = error.status || 500;
   const message = error.message || 'Internal Server Error';
   res.status(statusCode).json({ message });
 });
 
-// Set up the port from .env or default to 5000
-const PORT = process.env.PORT || 5000;
-
 // Start the server
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
