@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { jwtDecode } from 'jwt-decode';
+import * as jwt_decode from 'jwt-decode';
 import { getAllJobs, getCompanyDetails, deleteJob } from '../api/index';
 import { generateQuestions, evaluateAnswer } from '../api/gemini';
 import Cookies from 'js-cookie';
@@ -20,12 +20,14 @@ const JobsList = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedJobTitle, setSelectedJobTitle] = useState('');
 
-  // New states for answers and evaluation
+  // New states for answers, evaluation, and voice recording
   const [answers, setAnswers] = useState({});
   const [evaluationResults, setEvaluationResults] = useState({});
   const [evaluating, setEvaluating] = useState(false);
+  const [listeningIndex, setListeningIndex] = useState(null);
 
   const navigate = useNavigate();
+  const recognitionRef = useRef(null);
 
   // Capture console.log messages and push to state
   useEffect(() => {
@@ -61,7 +63,7 @@ const JobsList = () => {
     console.log('Token from cookies:', token);
     if (token) {
       try {
-        const decoded = jwtDecode(token);
+        const decoded = jwt_decode.default(token);
         console.log('Decoded token:', decoded);
         setUserRole(decoded.role);
         setUserId(decoded.id);
@@ -92,8 +94,6 @@ const JobsList = () => {
   };
 
   // Generate questions when applying
-
-
   const handleDeleteJob = async (jobId, createdBy) => {
     console.log(`Attempt to delete job ${jobId} by user ${userId}`);
     if (userRole !== 'company' || userId !== createdBy) {
@@ -115,93 +115,142 @@ const JobsList = () => {
 
   const filteredJobs = jobs.filter(job => job.title.toLowerCase().includes(searchTerm.toLowerCase()));
 
-
-const handleApplyNow = async (job) => {
-  console.log(`User ${userId} requesting questions for job ${job._id}`);
-  setErrorMessage('');
-  setEvaluationResults({});
-  setAnswers({});
-  try {
-    const qs = await generateQuestions(job.description);
-    console.log('Generated questions:', qs);
-    setQuestions(qs);
-    setSelectedJobTitle(job.title);
-    setSelectedJobId(job._id);  // <--- Set the job id here!
-    setModalOpen(true);
-  } catch (err) {
-    console.error('Error generating questions:', err);
-    setErrorMessage('Failed to generate questions.');
-  }
-};
-
-const handleSubmitAnswers = async () => {
-  setEvaluating(true);
-  setErrorMessage('');
-  try {
-    const results = {};
-
-    for (let i = 0; i < questions.length; i++) {
-      const question = questions[i];
-      const answer = answers[i] || '';
-
-      if (!answer.trim()) {
-        results[i] = 'No answer provided.';
-        continue;
-      }
-
-      console.log(`[QA] Evaluating answer for question ${i}:`, answer);
-      const feedbackText = await evaluateAnswer(question, answer);
-      console.log(`[QA] Received feedback for question ${i}:`, feedbackText);
-      results[i] = feedbackText;
-
-      // Extract numeric score from feedback text
-      const scoreMatch = feedbackText.match(/Score:\s*(\d+)\/10/i);
-      const score = scoreMatch ? parseInt(scoreMatch[1], 10) : null;
-      console.log(`[QA] Parsed score for question ${i}:`, score);
-
-      // Construct payload including jobId
-      const payload = {
-        jobId: selectedJobId,          // <--- add jobId here
-        question,
-        answer,
-        evaluation: { score, feedback: feedbackText },
-      };
-
-      console.log(`[QA] Sending to backend for question ${i}:`, payload);
-
-      try {
-        const resp = await fetch('http://localhost:5000/api/interview-responses', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include', // if needed
-          body: JSON.stringify(payload),
-        });
-        if (!resp.ok) {
-          const errBody = await resp.text();
-          console.error(`[QA] Backend returned error for question ${i}:`, resp.status, errBody);
-        } else {
-          console.log(`[QA] Successfully saved question ${i} to backend.`);
-        }
-      } catch (saveErr) {
-        console.error(`[QA] Network error saving question ${i}:`, saveErr);
-      }
+  const handleApplyNow = async (job) => {
+    console.log(`User ${userId} requesting questions for job ${job._id}`);
+    setErrorMessage('');
+    setEvaluationResults({});
+    setAnswers({});
+    try {
+      const qs = await generateQuestions(job.description);
+      console.log('Generated questions:', qs);
+      setQuestions(qs);
+      setSelectedJobTitle(job.title);
+      setSelectedJobId(job._id);
+      setModalOpen(true);
+    } catch (err) {
+      console.error('Error generating questions:', err);
+      setErrorMessage('Failed to generate questions.');
     }
+  };
 
-    setEvaluationResults(results);
+  const handleSubmitAnswers = async () => {
+    setEvaluating(true);
+    setErrorMessage('');
+    try {
+      const results = {};
 
-  } catch (err) {
-    setErrorMessage('Failed to evaluate answers.');
-    console.error('[QA] Unexpected error:', err);
-  } finally {
-    setEvaluating(false);
-  }
-};
+      for (let i = 0; i < questions.length; i++) {
+        const question = questions[i];
+        const answer = answers[i] || '';
+
+        if (!answer.trim()) {
+          results[i] = 'No answer provided.';
+          continue;
+        }
+
+        console.log(`[QA] Evaluating answer for question ${i}:`, answer);
+        const feedbackText = await evaluateAnswer(question, answer);
+        console.log(`[QA] Received feedback for question ${i}:`, feedbackText);
+        results[i] = feedbackText;
+
+        // Extract numeric score from feedback text
+        const scoreMatch = feedbackText.match(/Score:\s*(\d+)\/10/i);
+        const score = scoreMatch ? parseInt(scoreMatch[1], 10) : null;
+        console.log(`[QA] Parsed score for question ${i}:`, score);
+
+        // Construct payload including jobId
+        const payload = {
+          jobId: selectedJobId,
+          question,
+          answer,
+          evaluation: { score, feedback: feedbackText },
+        };
+
+        console.log(`[QA] Sending to backend for question ${i}:`, payload);
+
+        try {
+          const resp = await fetch('http://localhost:5000/api/interview-responses', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify(payload),
+          });
+          if (!resp.ok) {
+            const errBody = await resp.text();
+            console.error(`[QA] Backend returned error for question ${i}:`, resp.status, errBody);
+          } else {
+            console.log(`[QA] Successfully saved question ${i} to backend.`);
+          }
+        } catch (saveErr) {
+          console.error(`[QA] Network error saving question ${i}:`, saveErr);
+        }
+      }
+
+      setEvaluationResults(results);
+    } catch (err) {
+      setErrorMessage('Failed to evaluate answers.');
+      console.error('[QA] Unexpected error:', err);
+    } finally {
+      setEvaluating(false);
+    }
+  };
 
   const handleAnswerChange = (index, value) => {
     setAnswers(prev => ({ ...prev, [index]: value }));
   };
 
+  // Voice to text handlers
+  const startListening = (index) => {
+    if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+      alert('Speech Recognition API not supported in this browser.');
+      return;
+    }
 
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-US';
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setListeningIndex(index);
+      console.log(`Voice recognition started for question ${index}`);
+    };
+
+    recognition.onresult = (event) => {
+      let transcript = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        transcript += event.results[i][0].transcript;
+      }
+      setAnswers(prev => ({ ...prev, [index]: transcript }));
+    };
+
+    recognition.onerror = (event) => {
+      console.error('Speech recognition error:', event.error);
+      alert('Speech recognition error: ' + event.error);
+      setListeningIndex(null);
+    };
+
+    recognition.onend = () => {
+      setListeningIndex(null);
+      console.log(`Voice recognition ended for question ${index}`);
+    };
+
+    recognition.start();
+    recognitionRef.current = recognition;
+  };
+
+  const stopListening = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+    }
+  };
 
   if (loading) return <div className="text-gray-700 p-4">Loading jobs...</div>;
   if (error) return <div className="text-red-600 p-4">{error}</div>;
@@ -209,16 +258,15 @@ const handleSubmitAnswers = async () => {
   return (
     <div className="p-4 md:p-8 min-h-screen pt-6 pb-12" style={{ backgroundColor: '#eef2ff' }}>
       <div className="max-w-6xl mx-auto space-y-6">
-<div className="mb-6 m-10 relative z-10 bg-white p-4 rounded-xl shadow-md border border-gray-200">
-  <input
-    type="text"
-    placeholder="Search by job title"
-    value={searchTerm}
-    onChange={handleSearchChange}
-    className="w-full px-4 py-2 border border-gray-300 bg-gray-50 text-gray-800 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
-  />
-</div>
-
+        <div className="mb-6 m-10 relative z-10 bg-white p-4 rounded-xl shadow-md border border-gray-200">
+          <input
+            type="text"
+            placeholder="Search by job title"
+            value={searchTerm}
+            onChange={handleSearchChange}
+            className="w-full px-4 py-2 border border-gray-300 bg-gray-50 text-gray-800 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+          />
+        </div>
 
         {errorMessage && (
           <div className="p-4 bg-red-100 text-red-700 rounded-md shadow-md mb-6 text-center">
@@ -227,51 +275,51 @@ const handleSubmitAnswers = async () => {
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-         {filteredJobs.map(job => {
-  const company = companyDetailsMap[job.company] || {};
-  const isOwner = userRole === 'company' && userId === job.createdBy;
-  return (
-    <div key={job._id} className="bg-white p-6 rounded-2xl shadow-md border border-gray-200 hover:shadow-xl transition-shadow duration-300">
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-xl font-semibold text-indigo-700">{job.title}</h3>
-        <span className="text-sm text-gray-500">{job.location}</span>
-      </div>
-      <p className="text-gray-700 text-sm mb-3">{job.description}</p>
-      <div className="text-sm text-gray-600 space-y-1 mb-4">
-        <p><span className="font-medium text-gray-800">Company:</span> {company.name}</p>
-        <p>💰 <span className="font-medium text-gray-800">Salary:</span> NPR {job.salary}</p>
-      </div>
-      
-      {userRole !== 'company' && (
-        <button
-          onClick={() => handleApplyNow(job)}
-          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-xl transition-colors duration-200"
-        >
-          Apply Now
-        </button>
-      )}
-      
-      {isOwner && (
-        <button
-          onClick={() => handleDeleteJob(job._id, job.createdBy)}
-          className="w-full mt-2 bg-red-600 hover:bg-red-700 text-white py-2 rounded-xl transition-colors duration-200"
-        >
-          Delete Job
-        </button>
-      )}
-    </div>
-  );
-})}
+          {filteredJobs.map(job => {
+            const company = companyDetailsMap[job.company] || {};
+            const isOwner = userRole === 'company' && userId === job.createdBy;
+            return (
+              <div key={job._id} className="bg-white p-6 rounded-2xl shadow-md border border-gray-200 hover:shadow-xl transition-shadow duration-300">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-xl font-semibold text-indigo-700">{job.title}</h3>
+                  <span className="text-sm text-gray-500">{job.location}</span>
+                </div>
+                <p className="text-gray-700 text-sm mb-3">{job.description}</p>
+                <div className="text-sm text-gray-600 space-y-1 mb-4">
+                  <p><span className="font-medium text-gray-800">Company:</span> {company.name}</p>
+                  <p>💰 <span className="font-medium text-gray-800">Salary:</span> NPR {job.salary}</p>
+                </div>
 
+                {userRole !== 'company' && (
+                  <button
+                    onClick={() => handleApplyNow(job)}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-xl transition-colors duration-200"
+                  >
+                    Apply Now
+                  </button>
+                )}
+
+                {isOwner && (
+                  <button
+                    onClick={() => handleDeleteJob(job._id, job.createdBy)}
+                    className="w-full mt-2 bg-red-600 hover:bg-red-700 text-white py-2 rounded-xl transition-colors duration-200"
+                  >
+                    Delete Job
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
-
-      
 
         {/* Modal for Questions & Answers */}
         {modalOpen && (
           <div
             className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-            onClick={() => setModalOpen(false)}
+            onClick={() => {
+              stopListening();
+              setModalOpen(false);
+            }}
             role="dialog"
             aria-modal="true"
             aria-labelledby="modal-title"
@@ -299,6 +347,21 @@ const handleSubmitAnswers = async () => {
                           value={answers[i] || ''}
                           onChange={e => handleAnswerChange(i, e.target.value)}
                         />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (listeningIndex === i) {
+                              stopListening();
+                            } else {
+                              startListening(i);
+                            }
+                          }}
+                          className={`mt-1 px-3 py-1 rounded-md text-white ${
+                            listeningIndex === i ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
+                          }`}
+                        >
+                          {listeningIndex === i ? 'Stop Recording' : 'Voice Input'}
+                        </button>
                         {evaluationResults[i] && (
                           <p className="mt-1 text-sm text-green-700 font-medium">
                             Feedback: {evaluationResults[i]}
@@ -318,7 +381,10 @@ const handleSubmitAnswers = async () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setModalOpen(false)}
+                    onClick={() => {
+                      stopListening();
+                      setModalOpen(false);
+                    }}
                     className="mt-3 w-full bg-gray-300 hover:bg-gray-400 text-gray-900 py-2 rounded-xl transition-colors duration-200"
                   >
                     Close

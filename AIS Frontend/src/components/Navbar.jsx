@@ -73,6 +73,27 @@ const Navbar = () => {
           <span className="text-sm">Home</span>
         </Link>
 
+        <a
+          href="http://localhost:8501/"
+          className="flex items-center space-x-1 hover:text-primary transition-all text-gray-600"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-5 w-5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M9 17v-2a1 1 0 011-1h4a1 1 0 011 1v2m-5-6h.01M12 11a1 1 0 100-2 1 1 0 000 2zm0-9a9 9 0 100 18 9 9 0 000-18z"
+            />
+          </svg>
+          <span className="text-sm">Mock Interview</span>
+        </a>
+
         {token && role === "company" && (
           <Link
             to="/company-dashboard"
@@ -225,7 +246,7 @@ const Navbar = () => {
               </svg>
             </div>
             <span className="text-sm font-medium text-gray-700">
-             Hi,{userName}
+              Hi, {userName}
             </span>
           </div>
           <button
