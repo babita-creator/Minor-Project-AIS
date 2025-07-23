@@ -1,0 +1,9 @@
+streamlit
+python-dotenv
+google-generativeai
+PyMuPDF
+langchain-core
+langchain-google-genai
+SpeechRecognition
+pyaudio
+streamlit-webrtc
