@@ -20,11 +20,15 @@ const JobsList = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedJobTitle, setSelectedJobTitle] = useState('');
 
-  // New states for answers, evaluation, and voice recording
+  // New states for answers, evaluation, voice recording and timer
   const [answers, setAnswers] = useState({});
   const [evaluationResults, setEvaluationResults] = useState({});
   const [evaluating, setEvaluating] = useState(false);
   const [listeningIndex, setListeningIndex] = useState(null);
+
+  // Timer state (30 minutes in seconds)
+  const [timeLeft, setTimeLeft] = useState(30 * 60);
+  const timerRef = useRef(null);
 
   const navigate = useNavigate();
   const recognitionRef = useRef(null);
@@ -93,7 +97,7 @@ const JobsList = () => {
     console.log('Search term:', e.target.value);
   };
 
-  // Generate questions when applying
+  // Handle job deletion
   const handleDeleteJob = async (jobId, createdBy) => {
     console.log(`Attempt to delete job ${jobId} by user ${userId}`);
     if (userRole !== 'company' || userId !== createdBy) {
@@ -115,6 +119,37 @@ const JobsList = () => {
 
   const filteredJobs = jobs.filter(job => job.title.toLowerCase().includes(searchTerm.toLowerCase()));
 
+  // Format timer as mm:ss
+  const formatTime = (seconds) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+  };
+
+  // Start timer on modal open
+  const startTimer = () => {
+    setTimeLeft(30 * 60); // reset to 30 minutes
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev <= 1) {
+          clearInterval(timerRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  // Stop timer on modal close
+  const stopTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  // Generate questions when applying, start timer
   const handleApplyNow = async (job) => {
     console.log(`User ${userId} requesting questions for job ${job._id}`);
     setErrorMessage('');
@@ -127,13 +162,19 @@ const JobsList = () => {
       setSelectedJobTitle(job.title);
       setSelectedJobId(job._id);
       setModalOpen(true);
+      startTimer();
     } catch (err) {
       console.error('Error generating questions:', err);
       setErrorMessage('Failed to generate questions.');
     }
   };
 
+  // Submit answers with evaluation, disable if timer ended
   const handleSubmitAnswers = async () => {
+    if (timeLeft === 0) {
+      setErrorMessage('Time is up! You cannot submit answers.');
+      return;
+    }
     setEvaluating(true);
     setErrorMessage('');
     try {
@@ -280,120 +321,123 @@ const JobsList = () => {
             const isOwner = userRole === 'company' && userId === job.createdBy;
             return (
               <div key={job._id} className="bg-white p-6 rounded-2xl shadow-md border border-gray-200 hover:shadow-xl transition-shadow duration-300">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-xl font-semibold text-indigo-700">{job.title}</h3>
-                  <span className="text-sm text-gray-500">{job.location}</span>
+                <div className="flex items-center space-x-4">
+                  <img
+                    src={job.logo || 'https://via.placeholder.com/80'}
+                    alt={`${job.title} logo`}
+                    className="w-16 h-16 object-contain rounded-xl"
+                    loading="lazy"
+                    decoding="async"
+                    width={80}
+                    height={80}
+                  />
+                  <div className="flex flex-col space-y-1">
+                    <h3 className="text-lg font-semibold text-indigo-700">{job.title}</h3>
+                    <p className="text-gray-600">{company.name || 'Loading company...'}</p>
+                    <p className="text-gray-500 text-sm">{job.experience} years experience</p>
+                    <p className="text-gray-500 text-sm">Posted on: {new Date(job.createdAt).toLocaleDateString()}</p>
+                  </div>
                 </div>
-                <p className="text-gray-700 text-sm mb-3">{job.description}</p>
-                <div className="text-sm text-gray-600 space-y-1 mb-4">
-                  <p><span className="font-medium text-gray-800">Company:</span> {company.name}</p>
-                  <p>💰 <span className="font-medium text-gray-800">Salary:</span> NPR {job.salary}</p>
-                </div>
+                <p className="mt-3 text-gray-700 line-clamp-3">{job.description}</p>
 
-                {userRole !== 'company' && (
+                <div className="flex justify-between mt-4 items-center">
                   <button
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold"
                     onClick={() => handleApplyNow(job)}
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-xl transition-colors duration-200"
                   >
                     Apply Now
                   </button>
-                )}
 
-                {isOwner && (
-                  <button
-                    onClick={() => handleDeleteJob(job._id, job.createdBy)}
-                    className="w-full mt-2 bg-red-600 hover:bg-red-700 text-white py-2 rounded-xl transition-colors duration-200"
-                  >
-                    Delete Job
-                  </button>
-                )}
+                  {isOwner && (
+                    <button
+                      className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded-xl font-semibold"
+                      onClick={() => handleDeleteJob(job._id, job.createdBy)}
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })}
         </div>
 
-        {/* Modal for Questions & Answers */}
+        {/* Interview Modal */}
         {modalOpen && (
           <div
-            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-            onClick={() => {
-              stopListening();
-              setModalOpen(false);
-            }}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="modal-title"
+            className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-start pt-20 z-50 overflow-auto"
+            onClick={() => { setModalOpen(false); stopTimer(); stopListening(); }}
           >
             <div
-              className="bg-white rounded-lg max-w-lg w-full p-6 shadow-lg max-h-[80vh] overflow-y-auto"
+              className="bg-white rounded-2xl shadow-xl max-w-3xl w-full max-h-[85vh] overflow-y-auto p-6 relative"
               onClick={e => e.stopPropagation()}
             >
-              <h2 id="modal-title" className="text-xl font-bold mb-4">
-                Interview Questions for: <span className="text-indigo-600">{selectedJobTitle}</span>
-              </h2>
+              <h2 className="text-2xl font-bold mb-4 text-indigo-700">{selectedJobTitle} - Interview Questions</h2>
 
-              {questions.length === 0 ? (
-                <p>No questions generated.</p>
-              ) : (
-                <form onSubmit={e => { e.preventDefault(); handleSubmitAnswers(); }}>
-                  <ol className="list-decimal list-inside space-y-6 text-gray-800">
-                    {questions.map((q, i) => (
-                      <li key={i} className="space-y-2">
-                        <p className="font-semibold">{q}</p>
-                        <textarea
-                          rows={3}
-                          className="w-full p-2 border rounded-md border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                          placeholder="Write your answer here..."
-                          value={answers[i] || ''}
-                          onChange={e => handleAnswerChange(i, e.target.value)}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (listeningIndex === i) {
-                              stopListening();
-                            } else {
-                              startListening(i);
-                            }
-                          }}
-                          className={`mt-1 px-3 py-1 rounded-md text-white ${
-                            listeningIndex === i ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
-                          }`}
-                        >
-                          {listeningIndex === i ? 'Stop Recording' : 'Voice Input'}
-                        </button>
-                        {evaluationResults[i] && (
-                          <p className="mt-1 text-sm text-green-700 font-medium">
-                            Feedback: {evaluationResults[i]}
-                          </p>
-                        )}
-                      </li>
-                    ))}
-                  </ol>
-                  <button
-                    type="submit"
-                    disabled={evaluating}
-                    className={`mt-6 w-full py-2 rounded-xl text-white transition-colors duration-200 ${
-                      evaluating ? 'bg-gray-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'
-                    }`}
-                  >
-                    {evaluating ? 'Evaluating...' : 'Submit Answers'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      stopListening();
-                      setModalOpen(false);
-                    }}
-                    className="mt-3 w-full bg-gray-300 hover:bg-gray-400 text-gray-900 py-2 rounded-xl transition-colors duration-200"
-                  >
-                    Close
-                  </button>
-                </form>
-              )}
+              <div className="mb-4 text-right font-mono text-lg text-red-600">
+                Time left: {formatTime(timeLeft)}
+              </div>
+
+              {questions.length === 0 && <p>No questions available.</p>}
+
+              {questions.map((q, i) => (
+                <div key={i} className="mb-6 border border-gray-300 rounded-xl p-4 shadow-sm">
+                  <p className="font-semibold mb-2">{i + 1}. {q}</p>
+                  <textarea
+                    rows={4}
+                    value={answers[i] || ''}
+                    onChange={e => handleAnswerChange(i, e.target.value)}
+                    disabled={timeLeft === 0}
+                    className="w-full rounded-lg border border-gray-300 p-3 resize-none focus:outline-indigo-500"
+                    placeholder="Type your answer here..."
+                  />
+                  <div className="flex items-center mt-2 space-x-4">
+                    <button
+                      type="button"
+                      className={`px-3 py-1 rounded-lg font-semibold ${
+                        listeningIndex === i ? 'bg-red-400 text-white' : 'bg-indigo-500 text-white hover:bg-indigo-600'
+                      }`}
+                      onClick={() => (listeningIndex === i ? stopListening() : startListening(i))}
+                      disabled={timeLeft === 0}
+                    >
+                      {listeningIndex === i ? 'Stop Recording' : 'Start Voice Input'}
+                    </button>
+
+                    {evaluationResults[i] && (
+                      <div className="text-green-700 font-mono whitespace-pre-wrap">
+                        <strong>Feedback:</strong> {evaluationResults[i]}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              <div className="flex justify-end space-x-4 mt-6">
+                <button
+                  className="px-6 py-2 bg-gray-300 rounded-xl font-semibold hover:bg-gray-400"
+                  onClick={() => {
+                    setModalOpen(false);
+                    stopTimer();
+                    stopListening();
+                  }}
+                >
+                  Close
+                </button>
+                <button
+                  className={`px-6 py-2 rounded-xl font-semibold text-white ${
+                    timeLeft === 0 || evaluating ? 'bg-gray-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'
+                  }`}
+                  onClick={handleSubmitAnswers}
+                  disabled={timeLeft === 0 || evaluating}
+                >
+                  {evaluating ? 'Submitting...' : 'Submit Answers'}
+                </button>
+              </div>
             </div>
           </div>
         )}
+
+      
       </div>
     </div>
   );
