@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { jwtDecode } from 'jwt-decode';
+import * as jwt_decode from 'jwt-decode';
 import { getAllJobs, getCompanyDetails, deleteJob } from '../api/index';
 import { generateQuestions, evaluateAnswer } from '../api/gemini';
 import Cookies from 'js-cookie';
@@ -19,15 +19,21 @@ const JobsList = () => {
   const [questions, setQuestions] = useState([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedJobTitle, setSelectedJobTitle] = useState('');
+
+  // New states for answers, evaluation, voice recording and timer
   const [answers, setAnswers] = useState({});
   const [evaluationResults, setEvaluationResults] = useState({});
   const [evaluating, setEvaluating] = useState(false);
   const [listeningIndex, setListeningIndex] = useState(null);
 
+  // Timer state (30 minutes in seconds)
+  const [timeLeft, setTimeLeft] = useState(30 * 60);
+  const timerRef = useRef(null);
+
   const navigate = useNavigate();
   const recognitionRef = useRef(null);
 
-  // Capture console.log messages
+  // Capture console.log messages and push to state
   useEffect(() => {
     const originalLog = console.log;
     console.log = (...args) => {
@@ -61,42 +67,37 @@ const JobsList = () => {
     console.log('Token from cookies:', token);
     if (token) {
       try {
-        const decoded = jwtDecode(token); // Use jwtDecode directly
+        const decoded = jwt_decode.default(token);
         console.log('Decoded token:', decoded);
         setUserRole(decoded.role);
         setUserId(decoded.id);
       } catch (err) {
         console.error('Invalid token', err);
-        setErrorMessage('Authentication error: Invalid token.');
       }
-    } else {
-      console.log('No token found in cookies.');
-      setErrorMessage('Please log in to continue.');
     }
   }, []);
 
   // Fetch company details
-  useEffect(() => {
-    const fetchCompanyDetails = async id => {
-      if (!id || companyDetailsMap[id]) return;
-      console.log(`Fetching details for company: ${id}`);
-      try {
-        const resp = await getCompanyDetails(id);
-        console.log(`Company ${id} details:`, resp);
-        setCompanyDetailsMap(prev => ({ ...prev, [id]: resp || { name: 'N/A', email: 'N/A' } }));
-      } catch (err) {
-        console.error(`Error fetching company ${id}:`, err);
-        setCompanyDetailsMap(prev => ({ ...prev, [id]: { name: 'Error', email: 'N/A' } }));
-      }
-    };
-    jobs.forEach(job => fetchCompanyDetails(job.company));
-  }, [jobs, companyDetailsMap]);
+  const fetchCompanyDetails = async id => {
+    if (!id || companyDetailsMap[id]) return;
+    console.log(`Fetching details for company: ${id}`);
+    try {
+      const resp = await getCompanyDetails(id);
+      console.log(`Company ${id} details:`, resp);
+      setCompanyDetailsMap(prev => ({ ...prev, [id]: resp || { name: 'N/A', email: 'N/A' } }));
+    } catch (err) {
+      console.error(`Error fetching company ${id}:`, err);
+      setCompanyDetailsMap(prev => ({ ...prev, [id]: { name: 'Error', email: 'N/A' } }));
+    }
+  };
+  useEffect(() => { jobs.forEach(job => fetchCompanyDetails(job.company)); }, [jobs]);
 
   const handleSearchChange = e => {
     setSearchTerm(e.target.value);
     console.log('Search term:', e.target.value);
   };
 
+  // Handle job deletion
   const handleDeleteJob = async (jobId, createdBy) => {
     console.log(`Attempt to delete job ${jobId} by user ${userId}`);
     if (userRole !== 'company' || userId !== createdBy) {
@@ -116,60 +117,89 @@ const JobsList = () => {
     }
   };
 
+  const filteredJobs = jobs.filter(job => job.title.toLowerCase().includes(searchTerm.toLowerCase()));
+
+  // Format timer as mm:ss
+  const formatTime = (seconds) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+  };
+
+  // Start timer on modal open
+  const startTimer = () => {
+    setTimeLeft(30 * 60); // reset to 30 minutes
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev <= 1) {
+          clearInterval(timerRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  // Stop timer on modal close
+  const stopTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  // Generate questions when applying, start timer
   const handleApplyNow = async (job) => {
+    console.log(`User ${userId} requesting questions for job ${job._id}`);
+    setErrorMessage('');
+    setEvaluationResults({});
+    setAnswers({});
     try {
-      const token = Cookies.get('token'); // Fixed typo: 'vriabe' to 'token'
-      if (!token) {
-        console.error('Token not found');
-        setErrorMessage('Please log in to apply.');
-        return;
-      }
-
-      const decoded = jwtDecode(token);
-      if (decoded.role !== 'user') {
-        console.warn('Access denied: Role is not user');
-        setErrorMessage('Only users can apply for jobs.');
-        return;
-      }
-
-      console.log(`User ${decoded.id} requesting questions for job ${job._id}`);
-      setErrorMessage('');
-      setEvaluationResults({});
-      setAnswers({});
-
       const qs = await generateQuestions(job.description);
       console.log('Generated questions:', qs);
       setQuestions(qs);
       setSelectedJobTitle(job.title);
       setSelectedJobId(job._id);
       setModalOpen(true);
+      startTimer();
     } catch (err) {
-      console.error('Error handling apply now:', err);
+      console.error('Error generating questions:', err);
       setErrorMessage('Failed to generate questions.');
     }
   };
 
+  // Submit answers with evaluation, disable if timer ended
   const handleSubmitAnswers = async () => {
+    if (timeLeft === 0) {
+      setErrorMessage('Time is up! You cannot submit answers.');
+      return;
+    }
     setEvaluating(true);
     setErrorMessage('');
     try {
       const results = {};
+
       for (let i = 0; i < questions.length; i++) {
         const question = questions[i];
         const answer = answers[i] || '';
+
         if (!answer.trim()) {
           results[i] = 'No answer provided.';
           continue;
         }
+
         console.log(`[QA] Evaluating answer for question ${i}:`, answer);
         const feedbackText = await evaluateAnswer(question, answer);
         console.log(`[QA] Received feedback for question ${i}:`, feedbackText);
         results[i] = feedbackText;
 
+        // Extract numeric score from feedback text
         const scoreMatch = feedbackText.match(/Score:\s*(\d+)\/10/i);
         const score = scoreMatch ? parseInt(scoreMatch[1], 10) : null;
         console.log(`[QA] Parsed score for question ${i}:`, score);
 
+        // Construct payload including jobId
         const payload = {
           jobId: selectedJobId,
           question,
@@ -178,10 +208,11 @@ const JobsList = () => {
         };
 
         console.log(`[QA] Sending to backend for question ${i}:`, payload);
+
         try {
           const resp = await fetch('http://localhost:5000/api/interview-responses', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${Cookies.get('token')}` },
+            headers: { 'Content-Type': 'application/json' },
             credentials: 'include',
             body: JSON.stringify(payload),
           });
@@ -195,6 +226,7 @@ const JobsList = () => {
           console.error(`[QA] Network error saving question ${i}:`, saveErr);
         }
       }
+
       setEvaluationResults(results);
     } catch (err) {
       setErrorMessage('Failed to evaluate answers.');
@@ -208,16 +240,19 @@ const JobsList = () => {
     setAnswers(prev => ({ ...prev, [index]: value }));
   };
 
+  // Voice to text handlers
   const startListening = (index) => {
     if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
       alert('Speech Recognition API not supported in this browser.');
       return;
     }
+
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (recognitionRef.current) {
       recognitionRef.current.stop();
       recognitionRef.current = null;
     }
+
     const recognition = new SpeechRecognition();
     recognition.lang = 'en-US';
     recognition.interimResults = true;
@@ -227,6 +262,7 @@ const JobsList = () => {
       setListeningIndex(index);
       console.log(`Voice recognition started for question ${index}`);
     };
+
     recognition.onresult = (event) => {
       let transcript = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -234,15 +270,18 @@ const JobsList = () => {
       }
       setAnswers(prev => ({ ...prev, [index]: transcript }));
     };
+
     recognition.onerror = (event) => {
       console.error('Speech recognition error:', event.error);
       alert('Speech recognition error: ' + event.error);
       setListeningIndex(null);
     };
+
     recognition.onend = () => {
       setListeningIndex(null);
       console.log(`Voice recognition ended for question ${index}`);
     };
+
     recognition.start();
     recognitionRef.current = recognition;
   };
@@ -269,126 +308,136 @@ const JobsList = () => {
             className="w-full px-4 py-2 border border-gray-300 bg-gray-50 text-gray-800 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
           />
         </div>
+
         {errorMessage && (
           <div className="p-4 bg-red-100 text-red-700 rounded-md shadow-md mb-6 text-center">
             {errorMessage}
           </div>
         )}
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {jobs.filter(job => job.title.toLowerCase().includes(searchTerm.toLowerCase())).map(job => {
+          {filteredJobs.map(job => {
             const company = companyDetailsMap[job.company] || {};
             const isOwner = userRole === 'company' && userId === job.createdBy;
             return (
               <div key={job._id} className="bg-white p-6 rounded-2xl shadow-md border border-gray-200 hover:shadow-xl transition-shadow duration-300">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-xl font-semibold text-indigo-700">{job.title}</h3>
-                  <span className="text-sm text-gray-500">{job.location}</span>
+                <div className="flex items-center space-x-4">
+                  <img
+                    src={job.logo || 'https://via.placeholder.com/80'}
+                    alt={`${job.title} logo`}
+                    className="w-16 h-16 object-contain rounded-xl"
+                    loading="lazy"
+                    decoding="async"
+                    width={80}
+                    height={80}
+                  />
+                  <div className="flex flex-col space-y-1">
+                    <h3 className="text-lg font-semibold text-indigo-700">{job.title}</h3>
+                    <p className="text-gray-600">{company.name || 'Loading company...'}</p>
+                    <p className="text-gray-500 text-sm">{job.experience} years experience</p>
+                    <p className="text-gray-500 text-sm">Posted on: {new Date(job.createdAt).toLocaleDateString()}</p>
+                  </div>
                 </div>
-                <p className="text-gray-700 text-sm mb-3">{job.description}</p>
-                <div className="text-sm text-gray-600 space-y-1 mb-4">
-                  <p><span className="font-medium text-gray-800">Company:</span> {company.name}</p>
-                  <p>💰 <span className="font-medium text-gray-800">Salary:</span> NPR {job.salary}</p>
-                </div>
-                {userRole === 'user' && (
+                <p className="mt-3 text-gray-700 line-clamp-3">{job.description}</p>
+
+                <div className="flex justify-between mt-4 items-center">
                   <button
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold"
                     onClick={() => handleApplyNow(job)}
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-xl transition-colors duration-200"
                   >
                     Apply Now
                   </button>
-                )}
-                {isOwner && (
-                  <button
-                    onClick={() => handleDeleteJob(job._id, job.createdBy)}
-                    className="w-full mt-2 bg-red-600 hover:bg-red-700 text-white py-2 rounded-xl transition-colors duration-200"
-                  >
-                    Delete Job
-                  </button>
-                )}
+
+                  {isOwner && (
+                    <button
+                      className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded-xl font-semibold"
+                      onClick={() => handleDeleteJob(job._id, job.createdBy)}
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })}
         </div>
+
+        {/* Interview Modal */}
         {modalOpen && (
           <div
-            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-            onClick={() => {
-              stopListening();
-              setModalOpen(false);
-            }}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="modal-title"
+            className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-start pt-20 z-50 overflow-auto"
+            onClick={() => { setModalOpen(false); stopTimer(); stopListening(); }}
           >
             <div
-              className="bg-white rounded-lg max-w-lg w-full p-6 shadow-lg max-h-[80vh] overflow-y-auto"
+              className="bg-white rounded-2xl shadow-xl max-w-3xl w-full max-h-[85vh] overflow-y-auto p-6 relative"
               onClick={e => e.stopPropagation()}
             >
-              <h2 id="modal-title" className="text-xl font-bold mb-4">
-                Interview Questions for: <span className="text-indigo-600">{selectedJobTitle}</span>
-              </h2>
-              {questions.length === 0 ? (
-                <p>No questions generated.</p>
-              ) : (
-                <form onSubmit={e => { e.preventDefault(); handleSubmitAnswers(); }}>
-                  <ol className="list-decimal list-inside space-y-6 text-gray-800">
-                    {questions.map((q, i) => (
-                      <li key={i} className="space-y-2">
-                        <p className="font-semibold">{q}</p>
-                        <textarea
-                          rows={3}
-                          className="w-full p-2 border rounded-md border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                          placeholder="Write your answer here..."
-                          value={answers[i] || ''}
-                          onChange={e => handleAnswerChange(i, e.target.value)}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (listeningIndex === i) {
-                              stopListening();
-                            } else {
-                              startListening(i);
-                            }
-                          }}
-                          className={`mt-1 px-3 py-1 rounded-md text-white ${
-                            listeningIndex === i ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
-                          }`}
-                        >
-                          {listeningIndex === i ? 'Stop Recording' : 'Voice Input'}
-                        </button>
-                        {evaluationResults[i] && (
-                          <p className="mt-1 text-sm text-green-700 font-medium">
-                            Feedback: {evaluationResults[i]}
-                          </p>
-                        )}
-                      </li>
-                    ))}
-                  </ol>
-                  <button
-                    type="submit"
-                    disabled={evaluating}
-                    className={`mt-6 w-full py-2 rounded-xl text-white transition-colors duration-200 ${
-                      evaluating ? 'bg-gray-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'
-                    }`}
-                  >
-                    {evaluating ? 'Evaluating...' : 'Submit Answers'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      stopListening();
-                      setModalOpen(false);
-                    }}
-                    className="mt-3 w-full bg-gray-300 hover:bg-gray-400 text-gray-900 py-2 rounded-xl transition-colors duration-200"
-                  >
-                    Close
-                  </button>
-                </form>
-              )}
+              <h2 className="text-2xl font-bold mb-4 text-indigo-700">{selectedJobTitle} - Interview Questions</h2>
+
+              <div className="mb-4 text-right font-mono text-lg text-red-600">
+                Time left: {formatTime(timeLeft)}
+              </div>
+
+              {questions.length === 0 && <p>No questions available.</p>}
+
+              {questions.map((q, i) => (
+                <div key={i} className="mb-6 border border-gray-300 rounded-xl p-4 shadow-sm">
+                  <p className="font-semibold mb-2">{i + 1}. {q}</p>
+                  <textarea
+                    rows={4}
+                    value={answers[i] || ''}
+                    onChange={e => handleAnswerChange(i, e.target.value)}
+                    disabled={timeLeft === 0}
+                    className="w-full rounded-lg border border-gray-300 p-3 resize-none focus:outline-indigo-500"
+                    placeholder="Type your answer here..."
+                  />
+                  <div className="flex items-center mt-2 space-x-4">
+                    <button
+                      type="button"
+                      className={`px-3 py-1 rounded-lg font-semibold ${
+                        listeningIndex === i ? 'bg-red-400 text-white' : 'bg-indigo-500 text-white hover:bg-indigo-600'
+                      }`}
+                      onClick={() => (listeningIndex === i ? stopListening() : startListening(i))}
+                      disabled={timeLeft === 0}
+                    >
+                      {listeningIndex === i ? 'Stop Recording' : 'Start Voice Input'}
+                    </button>
+
+                    {evaluationResults[i] && (
+                      <div className="text-green-700 font-mono whitespace-pre-wrap">
+                        <strong>Feedback:</strong> {evaluationResults[i]}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              <div className="flex justify-end space-x-4 mt-6">
+                <button
+                  className="px-6 py-2 bg-gray-300 rounded-xl font-semibold hover:bg-gray-400"
+                  onClick={() => {
+                    setModalOpen(false);
+                    stopTimer();
+                    stopListening();
+                  }}
+                >
+                  Close
+                </button>
+                <button
+                  className={`px-6 py-2 rounded-xl font-semibold text-white ${
+                    timeLeft === 0 || evaluating ? 'bg-gray-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'
+                  }`}
+                  onClick={handleSubmitAnswers}
+                  disabled={timeLeft === 0 || evaluating}
+                >
+                  {evaluating ? 'Submitting...' : 'Submit Answers'}
+                </button>
+              </div>
             </div>
           </div>
         )}
+
+      
       </div>
     </div>
   );
