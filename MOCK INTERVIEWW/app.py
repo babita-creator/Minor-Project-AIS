@@ -207,4 +207,4 @@ if st.session_state.get('quit', False) or (
 
 if st.button("End Interview Early"):
     st.session_state['quit'] = True
-    st.rerun()
+    st.rerun()     

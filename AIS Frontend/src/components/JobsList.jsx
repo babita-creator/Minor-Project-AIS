@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import * as jwt_decode from 'jwt-decode';
+import { jwtDecode } from 'jwt-decode';
 import { getAllJobs, getCompanyDetails, deleteJob } from '../api/index';
 import { generateQuestions, evaluateAnswer } from '../api/gemini';
 import Cookies from 'js-cookie';
@@ -19,17 +19,16 @@ const JobsList = () => {
   const [questions, setQuestions] = useState([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedJobTitle, setSelectedJobTitle] = useState('');
-
-  // New states for answers, evaluation, and voice recording
   const [answers, setAnswers] = useState({});
   const [evaluationResults, setEvaluationResults] = useState({});
   const [evaluating, setEvaluating] = useState(false);
   const [listeningIndex, setListeningIndex] = useState(null);
+  const [isSubmitted, setIsSubmitted] = useState(false); // New state to track submission
 
   const navigate = useNavigate();
   const recognitionRef = useRef(null);
 
-  // Capture console.log messages and push to state
+  // Capture console.log messages
   useEffect(() => {
     const originalLog = console.log;
     console.log = (...args) => {
@@ -63,37 +62,42 @@ const JobsList = () => {
     console.log('Token from cookies:', token);
     if (token) {
       try {
-        const decoded = jwt_decode.default(token);
+        const decoded = jwtDecode(token);
         console.log('Decoded token:', decoded);
         setUserRole(decoded.role);
         setUserId(decoded.id);
       } catch (err) {
         console.error('Invalid token', err);
+        setErrorMessage('Authentication error: Invalid token.');
       }
+    } else {
+      console.log('No token found in cookies.');
+      setErrorMessage('Please log in to continue.');
     }
   }, []);
 
   // Fetch company details
-  const fetchCompanyDetails = async id => {
-    if (!id || companyDetailsMap[id]) return;
-    console.log(`Fetching details for company: ${id}`);
-    try {
-      const resp = await getCompanyDetails(id);
-      console.log(`Company ${id} details:`, resp);
-      setCompanyDetailsMap(prev => ({ ...prev, [id]: resp || { name: 'N/A', email: 'N/A' } }));
-    } catch (err) {
-      console.error(`Error fetching company ${id}:`, err);
-      setCompanyDetailsMap(prev => ({ ...prev, [id]: { name: 'Error', email: 'N/A' } }));
-    }
-  };
-  useEffect(() => { jobs.forEach(job => fetchCompanyDetails(job.company)); }, [jobs]);
+  useEffect(() => {
+    const fetchCompanyDetails = async id => {
+      if (!id || companyDetailsMap[id]) return;
+      console.log(`Fetching details for company: ${id}`);
+      try {
+        const resp = await getCompanyDetails(id);
+        console.log(`Company ${id} details:`, resp);
+        setCompanyDetailsMap(prev => ({ ...prev, [id]: resp || { name: 'N/A', email: 'N/A' } }));
+      } catch (err) {
+        console.error(`Error fetching company ${id}:`, err);
+        setCompanyDetailsMap(prev => ({ ...prev, [id]: { name: 'Error', email: 'N/A' } }));
+      }
+    };
+    jobs.forEach(job => fetchCompanyDetails(job.company));
+  }, [jobs, companyDetailsMap]);
 
   const handleSearchChange = e => {
     setSearchTerm(e.target.value);
     console.log('Search term:', e.target.value);
   };
 
-  // Generate questions when applying
   const handleDeleteJob = async (jobId, createdBy) => {
     console.log(`Attempt to delete job ${jobId} by user ${userId}`);
     if (userRole !== 'company' || userId !== createdBy) {
@@ -113,14 +117,27 @@ const JobsList = () => {
     }
   };
 
-  const filteredJobs = jobs.filter(job => job.title.toLowerCase().includes(searchTerm.toLowerCase()));
-
   const handleApplyNow = async (job) => {
-    console.log(`User ${userId} requesting questions for job ${job._id}`);
-    setErrorMessage('');
-    setEvaluationResults({});
-    setAnswers({});
     try {
+      const token = Cookies.get('token');
+      if (!token) {
+        console.error('Token not found');
+        setErrorMessage('Please log in to apply.');
+        return;
+      }
+
+      const decoded = jwtDecode(token);
+      if (decoded.role !== 'user') {
+        console.warn('Access denied: Role is not user');
+        setErrorMessage('Only users can apply for jobs.');
+        return;
+      }
+
+      console.log(`User ${decoded.id} requesting questions for job ${job._id}`);
+      setErrorMessage('');
+      setEvaluationResults({});
+      setAnswers({});
+      setIsSubmitted(false); // Reset submission state when opening modal
       const qs = await generateQuestions(job.description);
       console.log('Generated questions:', qs);
       setQuestions(qs);
@@ -128,37 +145,36 @@ const JobsList = () => {
       setSelectedJobId(job._id);
       setModalOpen(true);
     } catch (err) {
-      console.error('Error generating questions:', err);
+      console.error('Error handling apply now:', err);
       setErrorMessage('Failed to generate questions.');
     }
   };
 
   const handleSubmitAnswers = async () => {
+    if (isSubmitted) {
+      console.log('Submission already completed, preventing resubmission.');
+      return;
+    }
     setEvaluating(true);
     setErrorMessage('');
     try {
       const results = {};
-
       for (let i = 0; i < questions.length; i++) {
         const question = questions[i];
         const answer = answers[i] || '';
-
         if (!answer.trim()) {
           results[i] = 'No answer provided.';
           continue;
         }
-
         console.log(`[QA] Evaluating answer for question ${i}:`, answer);
         const feedbackText = await evaluateAnswer(question, answer);
         console.log(`[QA] Received feedback for question ${i}:`, feedbackText);
         results[i] = feedbackText;
 
-        // Extract numeric score from feedback text
         const scoreMatch = feedbackText.match(/Score:\s*(\d+)\/10/i);
         const score = scoreMatch ? parseInt(scoreMatch[1], 10) : null;
         console.log(`[QA] Parsed score for question ${i}:`, score);
 
-        // Construct payload including jobId
         const payload = {
           jobId: selectedJobId,
           question,
@@ -167,11 +183,10 @@ const JobsList = () => {
         };
 
         console.log(`[QA] Sending to backend for question ${i}:`, payload);
-
         try {
           const resp = await fetch('http://localhost:5000/api/interview-responses', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${Cookies.get('token')}` },
             credentials: 'include',
             body: JSON.stringify(payload),
           });
@@ -185,8 +200,8 @@ const JobsList = () => {
           console.error(`[QA] Network error saving question ${i}:`, saveErr);
         }
       }
-
       setEvaluationResults(results);
+      setIsSubmitted(true); // Mark as submitted
     } catch (err) {
       setErrorMessage('Failed to evaluate answers.');
       console.error('[QA] Unexpected error:', err);
@@ -199,19 +214,16 @@ const JobsList = () => {
     setAnswers(prev => ({ ...prev, [index]: value }));
   };
 
-  // Voice to text handlers
   const startListening = (index) => {
     if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
       alert('Speech Recognition API not supported in this browser.');
       return;
     }
-
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (recognitionRef.current) {
       recognitionRef.current.stop();
       recognitionRef.current = null;
     }
-
     const recognition = new SpeechRecognition();
     recognition.lang = 'en-US';
     recognition.interimResults = true;
@@ -221,7 +233,6 @@ const JobsList = () => {
       setListeningIndex(index);
       console.log(`Voice recognition started for question ${index}`);
     };
-
     recognition.onresult = (event) => {
       let transcript = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -229,18 +240,15 @@ const JobsList = () => {
       }
       setAnswers(prev => ({ ...prev, [index]: transcript }));
     };
-
     recognition.onerror = (event) => {
       console.error('Speech recognition error:', event.error);
       alert('Speech recognition error: ' + event.error);
       setListeningIndex(null);
     };
-
     recognition.onend = () => {
       setListeningIndex(null);
       console.log(`Voice recognition ended for question ${index}`);
     };
-
     recognition.start();
     recognitionRef.current = recognition;
   };
@@ -267,15 +275,13 @@ const JobsList = () => {
             className="w-full px-4 py-2 border border-gray-300 bg-gray-50 text-gray-800 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
           />
         </div>
-
         {errorMessage && (
           <div className="p-4 bg-red-100 text-red-700 rounded-md shadow-md mb-6 text-center">
             {errorMessage}
           </div>
         )}
-
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredJobs.map(job => {
+          {jobs.filter(job => job.title.toLowerCase().includes(searchTerm.toLowerCase())).map(job => {
             const company = companyDetailsMap[job.company] || {};
             const isOwner = userRole === 'company' && userId === job.createdBy;
             return (
@@ -289,8 +295,7 @@ const JobsList = () => {
                   <p><span className="font-medium text-gray-800">Company:</span> {company.name}</p>
                   <p>💰 <span className="font-medium text-gray-800">Salary:</span> NPR {job.salary}</p>
                 </div>
-
-                {userRole !== 'company' && (
+                {userRole === 'user' && (
                   <button
                     onClick={() => handleApplyNow(job)}
                     className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-xl transition-colors duration-200"
@@ -298,7 +303,6 @@ const JobsList = () => {
                     Apply Now
                   </button>
                 )}
-
                 {isOwner && (
                   <button
                     onClick={() => handleDeleteJob(job._id, job.createdBy)}
@@ -311,8 +315,6 @@ const JobsList = () => {
             );
           })}
         </div>
-
-        {/* Modal for Questions & Answers */}
         {modalOpen && (
           <div
             className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
@@ -331,7 +333,6 @@ const JobsList = () => {
               <h2 id="modal-title" className="text-xl font-bold mb-4">
                 Interview Questions for: <span className="text-indigo-600">{selectedJobTitle}</span>
               </h2>
-
               {questions.length === 0 ? (
                 <p>No questions generated.</p>
               ) : (
@@ -346,6 +347,7 @@ const JobsList = () => {
                           placeholder="Write your answer here..."
                           value={answers[i] || ''}
                           onChange={e => handleAnswerChange(i, e.target.value)}
+                          disabled={isSubmitted} // Disable textarea after submission
                         />
                         <button
                           type="button"
@@ -358,7 +360,8 @@ const JobsList = () => {
                           }}
                           className={`mt-1 px-3 py-1 rounded-md text-white ${
                             listeningIndex === i ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
-                          }`}
+                          } ${isSubmitted ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          disabled={isSubmitted} // Disable voice input after submission
                         >
                           {listeningIndex === i ? 'Stop Recording' : 'Voice Input'}
                         </button>
@@ -372,12 +375,12 @@ const JobsList = () => {
                   </ol>
                   <button
                     type="submit"
-                    disabled={evaluating}
+                    disabled={evaluating || isSubmitted}
                     className={`mt-6 w-full py-2 rounded-xl text-white transition-colors duration-200 ${
-                      evaluating ? 'bg-gray-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'
+                      evaluating || isSubmitted ? 'bg-gray-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'
                     }`}
                   >
-                    {evaluating ? 'Evaluating...' : 'Submit Answers'}
+                    {evaluating ? 'Evaluating...' : isSubmitted ? 'Submitted' : 'Submit Answers'}
                   </button>
                   <button
                     type="button"

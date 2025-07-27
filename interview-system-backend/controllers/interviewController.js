@@ -99,4 +99,4 @@ const getInterviewResults = async (req, res) => {
   }
 };
 
-module.exports = { scheduleInterview, getInterviewByJob, submitAnswer, getInterviewResults, getQuestionsByScheduleId };
+module.exports = { scheduleInterview, getInterviewByJob, submitAnswer, getInterviewResults, getQuestionsByScheduleId };  

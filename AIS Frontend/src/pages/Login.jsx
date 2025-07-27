@@ -4,7 +4,7 @@ import { loginUser, loginCompany } from "../api";
 import Cookies from "js-cookie";
 import fwu from "/fwu.jpg";
 
-import { FaEnvelope, FaLock, FaUserShield, FaUserTie } from "react-icons/fa";
+import { FaEnvelope, FaLock, FaUserShield } from "react-icons/fa";
 
 const Login = () => {
   const [email, setEmail] = useState("");
@@ -123,6 +123,18 @@ const Login = () => {
               <option value="company">Login as Company</option>
             </select>
           </div>
+
+          {/* Forgot Password Link */}
+          {/* Forgot Password Link */}
+<div className="text-center">
+  <Link
+    to="/forgot-password"
+    className="text-sm text-secondary hover:underline font-bold"
+  >
+    Forgot Password?
+  </Link>
+</div>
+
 
           {/* Submit Button */}
           <button

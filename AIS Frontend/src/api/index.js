@@ -197,7 +197,7 @@ export const getCompanyDetails = async (companyId) => {
     }
 
     const data = await response.json();
-    // console.log("Company details fetched successfully:", data);
+    // ompconsole.log("Cany details fetched successfully:", data);
     return data;
 
   } catch (error) {
